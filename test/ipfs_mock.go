@@ -18,9 +18,9 @@ import (
 	"github.com/ipfs/ipfs-cluster/datastore/inmem"
 	"github.com/ipfs/ipfs-cluster/state"
 	"github.com/ipfs/ipfs-cluster/state/dsstate"
+	"github.com/multiformats/go-multihash"
 
 	cid "github.com/ipfs/go-cid"
-	u "github.com/ipfs/go-ipfs-util"
 	cors "github.com/rs/cors"
 )
 
@@ -349,25 +349,29 @@ func (m *IpfsMock) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		// Parse cid from data and format and add to mock block-store
 		query := r.URL.Query()
-		format, ok := query["f"]
-		if !ok || len(format) != 1 {
-			goto ERROR
-		}
-		var c string
-		hash := u.Hash(data)
-		codec, ok := cid.Codecs[format[0]]
-		if !ok {
-			goto ERROR
-		}
-		if format[0] == "v0" {
-			c = cid.NewCidV0(hash).String()
+		format := cid.Codecs[query.Get("format")]
+		mhType := multihash.Names[query.Get("mhtype")]
+		mhLen, _ := strconv.Atoi(query.Get("mhLen"))
+
+		var builder cid.Builder
+		if format == cid.DagProtobuf && mhType == multihash.SHA2_256 {
+			builder = cid.V0Builder{}
 		} else {
-			c = cid.NewCidV1(codec, hash).String()
+			builder = cid.V1Builder{
+				Codec:    format,
+				MhType:   mhType,
+				MhLength: mhLen,
+			}
 		}
-		m.BlockStore[c] = data
+
+		c, err := builder.Sum(data)
+		if err != nil {
+			goto ERROR
+		}
+		m.BlockStore[c.String()] = data
 
 		resp := mockBlockPutResp{
-			Key: c,
+			Key: c.String(),
 		}
 		j, _ := json.Marshal(resp)
 		w.Write(j)
